@@ -6,6 +6,7 @@ const board = document.querySelector('[data-testid="board"]');
 const list = document.querySelector('[data-testid="incident-list"]');
 const loader = document.querySelector('[data-testid="loader"]');
 const empty = document.querySelector('[data-testid="empty"]');
+const newBar = document.querySelector('[data-testid="new-bar"]');
 
 /** id -> { ackedAt, receipt } for rows acked in this page (survives every refresh). */
 const acked = new Map();
@@ -65,7 +66,7 @@ function buildRow(i) {
   return row;
 }
 
-/** R1: keep existing rows, put new incidents on top, newest first. */
+/** Puts the given incidents on screen, newest first, reusing existing rows. */
 function render(incidents) {
   const sorted = [...incidents].sort((a, b) => Date.parse(b.openedAt) - Date.parse(a.openedAt));
   const seen = new Set();
@@ -91,16 +92,37 @@ function render(incidents) {
   list.hidden = sorted.length === 0;
 }
 
+/** R1 (product decision): the list holds still; new incidents wait behind the "N new" bar until on-call clicks it. */
+let latest = [];
+function pendingCount() {
+  return latest.filter((i) => !rows.has(i.id)).length;
+}
+function updateBar() {
+  const n = pendingCount();
+  newBar.hidden = n === 0;
+  newBar.textContent = `${n} new`;
+  newBar.setAttribute('aria-label', `${n} new incident${n === 1 ? '' : 's'}, show them`);
+}
+newBar.addEventListener('click', () => {
+  render(latest);
+  updateBar();
+});
+
+let loaded = false;
 let busy = false;
 async function refresh() {
   if (busy) return;
   busy = true;
   try {
     const page = await fetchIncidents();
-    render(page.incidents);
+    latest = page.incidents;
     board.dataset.updatedAt = page.updatedAt;
-    loader.hidden = true; // R3: gone once incidents are on screen
-    loader.remove?.();
+    if (!loaded) {
+      render(latest); // first load: everything on screen
+      loaded = true;
+      loader.remove(); // R3: gone once incidents are on screen
+    }
+    updateBar();
   } catch (err) {
     console.error(err);
   } finally {
